@@ -1,0 +1,255 @@
+//last edit 12Feb2019
+//last updated 12Feb2019
+
+
+//***************************** EDIT *****************************
+#define _thismodelname "nusa_autogate"
+#define _thisversion "1.0"
+//***************************** EDIT *****************************
+
+#include <Arduino.h>
+#include <jacksparrow.h>
+
+
+
+//for relay
+int relaypin1 = 5;  // Declare the Servo pin
+int relaypin2 = 4;  // Declare the Servo pin
+int relay1=0;
+int relay2=0;
+int mode=1;
+//for relay
+
+//for checkvoltage
+float vin = 0.0; //global var
+long checkvoltageprevmillis = 0;
+long checkvoltageinterval = 61000;//61sec interval
+//for checkvoltage
+
+
+//for sleep interval
+unsigned long sleeppreviousMillis=millis();
+long sleepinterval; //10min awake, then sleep
+int sleepduration; //set in setup
+//for sleep interval
+
+unsigned long currentMillis = millis();
+
+
+bool toupdatetime=1;
+int hournow=0;
+int minnow=0;
+int secnow=0;
+unsigned long millisoffset=0;
+int localhournow=0;
+int localminnow=0;
+int localsecnow=0;
+
+
+  
+void setup() {
+    Serial.begin(115200);
+
+//for restart
+pinMode(16,OUTPUT);digitalWrite(16,HIGH);
+//for restart
+
+//for relay
+pinMode(relaypin1,OUTPUT);digitalWrite(relaypin1,HIGH);//make sure it off
+pinMode(relaypin2,OUTPUT);digitalWrite(relaypin2,HIGH);//make sure it off
+//for relay
+
+
+
+//***************************** EDIT *****************************
+thisdevicename="nusa_autogate"; //without space
+pinginterval = 600*1000;
+//***************************** EDIT *****************************
+
+sleepinterval=1800*1000; //30min awake, then sleep
+sleepduration=30*1000*1000;//30sec sleep time
+sleeppreviousMillis=millis();
+
+server.on("/input", handleargs); 
+server.onNotFound(handleargs);
+server.begin(); 
+Serial.println(thisdevicename);
+
+}
+
+void loop(){
+if((WiFiMulti.run() != WL_CONNECTED)){connectinternet();
+setipifusinghomewifi();}
+
+
+server.handleClient();
+
+
+//ping server central
+  currentMillis = millis();
+if(pingpreviousMillis>currentMillis)pingpreviousMillis=currentMillis;
+  if (currentMillis - pingpreviousMillis >= pinginterval){Serial.println("in ping central");//debug
+    centralresult=pingcentral();Serial.println(centralresult);//debug
+    if(centralresult=="error")online=0;else online=1;
+    if(centralresult=="needupdate")ota_update(); // process central
+     pingpreviousMillis = currentMillis;   
+     
+
+}
+//ping server central
+
+
+/*
+//for checkvoltage
+unsigned long currentMillis2 = millis();
+if(currentMillis2 - checkvoltageprevmillis > checkvoltageinterval) { 
+checkvoltage(A0);//noneed to check on everyloop
+checkvoltageprevmillis = currentMillis2;}
+//for checkvoltage
+*/
+
+//deep sleep and restart
+currentMillis = millis();
+if(sleeppreviousMillis>currentMillis)sleeppreviousMillis=currentMillis;
+if (currentMillis - sleeppreviousMillis >= sleepinterval) {Serial.println("in sleep loop now...");//debug
+ESP.restart();//restart if connected LED pin16 to rst
+digitalWrite(16,LOW);delay(1000);digitalWrite(16,HIGH);
+sleeppreviousMillis = currentMillis;
+ESP.deepSleep(sleepduration);}  //for sleep,restart system
+//deep sleep and restart
+
+
+
+/* //debug
+Serial.println("online? = "+online);
+Serial.println("thisip = "+thisip);
+Serial.println("thisdeviceid = "+thisdeviceid);
+Serial.println("macaddress = "+macaddress);
+Serial.println("otaaddress = "+otaaddress);
+Serial.println("phpaddress = "+phpaddress);
+Serial.println("centralresult = "+centralresult);
+*/ //debug
+
+
+
+
+
+
+//USE_SERIAL.println(str);//debug
+//USE_SERIAL.println(relay1);//debug
+//USE_SERIAL.println(relay2);//debug
+//USE_SERIAL.println(sec_to_action);//debug
+
+
+//if(sec_to_action<40){
+//delay(sec_to_action*1000);//delay until event
+////process event
+//if(relay1==1)digitalWrite(relaypin1,LOW);else digitalWrite(relaypin1,HIGH);//high is off, low is open
+//if(relay2==1)digitalWrite(relaypin2,LOW);else digitalWrite(relaypin2,HIGH);
+//}
+
+
+
+
+
+
+/*needsleep=0;//debug 
+if(sec_to_action>=40)// if more than 60sec then think about sleep
+if(needsleep==1){
+//phpaddress=phpaddress7;      //reset the server phpaddress
+digitalWrite(relaypin1,HIGH);//make sure off first before sleeping
+digitalWrite(relaypin2,HIGH);
+sleeptime=min(sec_to_action,1200); //1200 is 20min
+Serial.println("I'm awake, but I'm going into deep sleep mode for "+String(sleeptime)+" seconds");
+delay(sleeptime*1000);//using light sleep
+//ESP.deepSleep((sleeptime-25)*1000000);
+}
+*/
+
+
+
+ 
+}//end of loop
+
+
+///////////////////////////////////////////////////////////////////////////////
+//function
+///////////////////////////////////////////////////////////////////////////////
+
+
+void handleargs(){
+
+String message = "";
+for (int i = 0; i < server.args(); i++) {
+message += server.argName(i) + ": ";     //Get the name of the parameter
+message += server.arg(i) + "<br>";              //Get the value of the parameter
+}
+server.send(200, "text/html", message);       //Response to the HTTP request
+
+
+if(server.arg("setup")=="1")handleargssetup();
+if(server.arg("gateboth")!="")gateboth(constrain(server.arg("gateboth").toInt(),0,10000));
+if(server.arg("gaterightopen")!="")gaterightopen(constrain(server.arg("gaterightopen").toInt(),0,10000));
+if(server.arg("gateleftopen")!="")gateleftopen(constrain(server.arg("gateleftopen").toInt(),0,10000));
+if(server.arg("gateswitchside")!="")gateswitchside();
+//server.send(200, "text/html", thisdevicename+"<br><br>/input?gateboth=1000<br>/input?gateleftopen=1000<br>/input?gaterightopen=1000<br>/input?gateswitchside=1 , milliseconds to open, max 10000");
+
+//server.send(200, "text/html", thisdevicename+"<br>pumpstrenght="+pumplevelset+", osllation="+pumposcset+"<br>battery voltage="+String(checkvoltage(A0)));
+
+
+//Serial.println(server.argName(0)+","+server.arg(0));
+sleeppreviousMillis=millis();//don't go to sleep first
+}
+
+
+void gateswitchside(){
+gateboth(0);
+delay(200);
+gateboth(0);
+}
+
+void gateboth(unsigned long interval){ // interval 0 for gate to open full lenght
+digitalWrite(relaypin2,LOW);
+delay(200);//delay during pressing
+digitalWrite(relaypin2,HIGH);
+delay(100);//delay for the main motherboard,relay to activate
+if(interval==0)return; //open or close to full lenght
+delay(interval);
+digitalWrite(relaypin2,LOW);
+delay(200);//delay during pressing
+digitalWrite(relaypin2,HIGH);
+}
+
+void gaterightopen(unsigned long interval){
+digitalWrite(relaypin1,LOW);
+delay(200);//delay during pressing
+digitalWrite(relaypin1,HIGH);
+delay(100);//delay for the main motherboard,relay to activate
+delay(interval);
+gateboth(0);
+}
+
+void gateleftopen(unsigned long interval){
+digitalWrite(relaypin1,LOW);
+delay(3000);//delay during pressing
+digitalWrite(relaypin1,HIGH);
+delay(100);//delay for the main motherboard,relay to activate
+delay(interval);
+gateboth(0);
+}
+
+void setipifusinghomewifi(){
+IPAddress ip=WiFi.localIP();
+if(ip[0]==192)
+if(ip[1]==168)
+if(ip[2]==0){
+IPAddress ip(192,168,0,90);
+IPAddress subnet(255,255,255,0);
+IPAddress gateway(192,168,0,1);
+WiFi.config(ip, gateway, subnet);
+Serial.println("set ip at home");}
+else Serial.println("NOT at home, skip set ip");
+}
+
+
+
